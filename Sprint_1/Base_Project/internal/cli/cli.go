@@ -31,7 +31,7 @@ func (c *CLI) Run(args []string) int {
 		return exitUsage
 	}
 
-	switch args[0] { // тут некорректно считывается команда, надо смотреть всю строку, а не только первые 2 записи
+	switch args[0] {
 	case "help":
 		return c.help(args[1:])
 	case "menu":
@@ -49,7 +49,7 @@ func (c *CLI) Run(args []string) int {
 }
 
 func (c *CLI) help(args []string) int {
-	if len(args) != 1 {
+	if len(args) != 0 {
 		fmt.Println("usage")
 		return exitUsage
 	}
@@ -60,7 +60,7 @@ func (c *CLI) help(args []string) int {
 }
 
 func (c *CLI) menu(args []string) int {
-	if len(args) != 1 {
+	if len(args) != 0 {
 		fmt.Println("usage")
 		return exitUsage
 	}
@@ -74,20 +74,20 @@ func (c *CLI) menu(args []string) int {
 }
 
 func (c *CLI) stock(args []string) int {
-	if len(args) < 2 {
+	if len(args) < 1 {
 		fmt.Println("usage")
 		return exitUsage
 	}
 
-	switch args[1] {
+	switch args[0] {
 	case "get":
-		return c.stockGet(args)
+		return c.stockGet(args[1:])
 
 	case "add":
-		return c.stockAdd(args)
+		return c.stockAdd(args[1:])
 
 	case "set":
-		return c.stockSet(args)
+		return c.stockSet(args[1:])
 
 	default:
 		fmt.Println("usage")
@@ -96,7 +96,7 @@ func (c *CLI) stock(args []string) int {
 }
 
 func (c *CLI) stockGet(args []string) int {
-	if len(args) != 2 {
+	if len(args) != 0 {
 		fmt.Println("usage")
 		return exitUsage
 	}
@@ -115,18 +115,18 @@ func (c *CLI) stockGet(args []string) int {
 }
 
 func (c *CLI) stockAdd(args []string) int {
-	if len(args) != 4 {
+	if len(args) != 2 {
 		fmt.Println("usage")
 		return exitUsage
 	}
 
-	quantity, err := strconv.Atoi(args[3])
+	quantity, err := strconv.Atoi(args[1])
 	if err != nil {
 		fmt.Println("некорректные параметры")
 		return exitError
 	}
 
-	if err := c.service.AddStock(args[2], quantity); err != nil {
+	if err := c.service.AddStock(args[0], quantity); err != nil {
 		fmt.Println(err)
 		return exitError
 	}
@@ -137,18 +137,18 @@ func (c *CLI) stockAdd(args []string) int {
 }
 
 func (c *CLI) stockSet(args []string) int {
-	if len(args) != 4 {
+	if len(args) != 2 {
 		fmt.Println("usage")
 		return exitUsage
 	}
 
-	quantity, err := strconv.Atoi(args[3])
+	quantity, err := strconv.Atoi(args[1])
 	if err != nil {
 		fmt.Println("некорректные параметры")
 		return exitError
 	}
 
-	if err := c.service.SetStock(args[2], quantity); err != nil {
+	if err := c.service.SetStock(args[0], quantity); err != nil {
 		fmt.Println(err)
 		return exitError
 	}
@@ -159,18 +159,18 @@ func (c *CLI) stockSet(args []string) int {
 }
 
 func (c *CLI) brew(args []string) int {
-	if len(args) != 4 || args[2] != "--pay" {
+	if len(args) != 3 || args[1] != "--pay" {
 		fmt.Println("usage")
 		return exitUsage
 	}
 
-	payment, err := strconv.Atoi(args[3])
+	payment, err := strconv.Atoi(args[2])
 	if err != nil {
 		fmt.Println("некорректные параметры")
 		return exitError
 	}
 
-	steps, err := c.service.Brew(args[1], payment)
+	steps, err := c.service.Brew(args[0], payment)
 	if err != nil {
 		fmt.Println(err)
 		return exitError
@@ -184,7 +184,7 @@ func (c *CLI) brew(args []string) int {
 }
 
 func (c *CLI) stats(args []string) int {
-	if len(args) != 1 {
+	if len(args) != 0 {
 		fmt.Println("usage")
 		return exitUsage
 	}

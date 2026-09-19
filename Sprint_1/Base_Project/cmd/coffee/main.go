@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bufio"
 	"os"
-	"strings"
 
 	"coffee/internal/cli"
 	"coffee/internal/domain"
@@ -27,19 +25,5 @@ func main() {
 
 	app := cli.New(coffeeService)
 
-	scanner := bufio.NewScanner(os.Stdin)
-
-	for scanner.Scan() {
-		args := strings.Fields(scanner.Text())
-
-		if len(args) == 0 {
-			continue
-		}
-
-		if args[0] == "exit" {
-			break
-		}
-
-		app.Run(args)
-	}
+	os.Exit(app.Run(os.Args[1:]))
 }
