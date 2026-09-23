@@ -11,9 +11,9 @@ import (
 
 func goroutineFabric(n int, wg *sync.WaitGroup) {
 	for i := 0; i < n; i++ {
+		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			wg.Add(1)
 			time.Sleep(time.Duration(i) * time.Millisecond)
 		}()
 	}
