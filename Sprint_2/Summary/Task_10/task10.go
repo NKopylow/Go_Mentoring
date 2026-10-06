@@ -2,7 +2,10 @@ package main
 
 import (
 	"fmt"
+	"math"
 	"runtime"
+	"sync"
+	"sync/atomic"
 )
 
 // Тема: горутины и планировщик.
@@ -45,6 +48,26 @@ func SequentialSum(nums []int) int {
 }
 
 func ParallelSum(nums []int, workers int) int {
+	defer recover()
+	if workers <= 0 {
+		workers = runtime.NumCPU()
+	}
+	if workers > len(nums) {
+		workers = len(nums)
+	}
+	var sum atomic.Int64
+	wg := sync.WaitGroup{}
+	chuncks := int(math.Ceil(float64(len(nums)) / float64(workers))) // 2
+	for i := 0; i < workers; i++ {
+		wg.Go(func() {
+			chunk := nums[i*chuncks : (i+1)*chuncks]
+			chunkSum := 0
+			for _, n := range chunk {
+				chunkSum += n
+			}
+			sum.Add(int64(chunkSum))
+		})
+	}
 	panic("not implemented")
 }
 
