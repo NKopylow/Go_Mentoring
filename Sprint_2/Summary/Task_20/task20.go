@@ -6,91 +6,51 @@ import (
 	"time"
 )
 
-// Тема: паттерны проектирования в Go (Functional Options, Decorator/Middleware, Observer,
-// Builder vs Options, Strategy), в связке с каналами и sync.
+// Тема: паттерны (Functional Options, Observer, Decorator).
 //
-// Задача 20. Универсальная шина событий (EventBus) с middleware.
+// Задача 20. EventBus на каналах.
 //
-// Часть A. Functional Options.
-//   Реализуй NewEventBus(opts ...Option) *EventBus с опциями:
-//     WithBufferSize(n)        — размер буфера подписчика (по умолчанию 16);
-//     WithWorkers(n)           — число горутин доставки (по умолчанию 1 => порядок событий сохраняется);
-//     WithDropPolicy(p)        — что делать, если буфер подписчика полон: Block | DropNewest | DropOldest;
-//     WithErrorHandler(fn)     — колбэк на ошибку обработчика (по умолчанию — логирование).
-//   Опции должны валидироваться (n <= 0 -> дефолт или паника с понятным текстом — выбери и обоснуй).
-//
-// Часть B. Observer на каналах.
-//   type Handler[T any] func(ctx context.Context, event T) error
-//
-//   func Subscribe[T any](bus *EventBus, topic string, h Handler[T]) (unsubscribe func())
-//   func Publish[T any](ctx context.Context, bus *EventBus, topic string, event T) error
-//
-//   Требования:
-//     - несколько подписчиков на один topic; каждый получает копию события;
-//     - unsubscribe безопасен при вызове дважды и во время доставки (нет паники "send on closed channel");
-//     - тип события проверяется: Publish[int] в topic, где подписчик Handler[string] -> ошибка
-//       ErrTypeMismatch (подсказка: хранить подписчиков как any и делать type assertion, либо
-//       хранить reflect.Type topic'а при первой подписке);
-//     - Close(ctx) — перестаёт принимать Publish (ErrClosed), дожидается доставки уже принятых событий
-//       или истечения ctx; идемпотентен.
-//
-// Часть C. Decorator (middleware) для обработчиков.
-//   type Middleware[T any] func(Handler[T]) Handler[T]
-//   func Chain[T any](h Handler[T], mws ...Middleware[T]) Handler[T]  // порядок — как у http middleware из урока
-//   Реализуй middleware: Recover (паника -> ошибка), Timeout(d), Retry(n) (переиспользуй идею из Task_12/17),
-//   Metrics (атомарные счётчики успех/ошибка/длительность, доступные через bus.Metrics()).
-//
-// Часть D. Strategy для DropPolicy — отдельные типы, реализующие интерфейс
-//   type dropStrategy interface { offer(ch chan any, ev any) (delivered bool) }
-//   чтобы добавить новую политику без изменений в EventBus.
-//
-// Тесты (go.mod + task20_test.go, с -race):
-//   - доставка всем подписчикам; порядок при WithWorkers(1);
-//   - unsubscribe во время активной публикации из 10 горутин — нет паник и гонок;
-//   - DropNewest/DropOldest при медленном подписчике (проверь, какие события потерялись);
-//   - Chain: порядок вызова middleware (записывай в срез под мьютексом);
-//   - Recover ловит панику, Timeout возвращает context.DeadlineExceeded;
-//   - Close дожидается in-flight событий; Publish после Close -> ErrClosed;
-//   - бенчмарк Publish с 1 и 10 подписчиками, с ReportAllocs.
-//
-// Вопрос (комментарием в конце файла): когда в Go стоит выбирать Builder вместо Functional Options,
-// и почему для конфигов обычно предпочитают Options?
-
-type DropPolicy int
-
-const (
-	Block DropPolicy = iota
-	DropNewest
-	DropOldest
-)
+// Тесты (-race): доставка всем подписчикам; unsubscribe безопасен; Publish после Close → ErrClosed;
+// Chain вызывает middleware в правильном порядке; Recover ловит панику.
 
 type Option func(*EventBus)
 
-func WithBufferSize(n int) Option                              { panic("not implemented") }
-func WithWorkers(n int) Option                                 { panic("not implemented") }
-func WithDropPolicy(p DropPolicy) Option                       { panic("not implemented") }
-func WithErrorHandler(fn func(topic string, err error)) Option { panic("not implemented") }
+// WithBufferSize — размер буфера канала подписчика (по умолчанию 16).
+func WithBufferSize(n int) Option { panic("not implemented") }
 
 type Handler[T any] func(ctx context.Context, event T) error
 type Middleware[T any] func(Handler[T]) Handler[T]
 
-func Chain[T any](h Handler[T], mws ...Middleware[T]) Handler[T] { panic("not implemented") }
-
-func Recover[T any]() Middleware[T]                { panic("not implemented") }
-func Timeout[T any](d time.Duration) Middleware[T] { panic("not implemented") }
-func Retry[T any](attempts int) Middleware[T]      { panic("not implemented") }
-
-type EventBus struct {
-	// TODO: поля
+// Chain оборачивает h middleware'ами (порядок как у http: последний mw — внешний).
+func Chain[T any](h Handler[T], mws ...Middleware[T]) Handler[T] {
+	panic("not implemented")
 }
 
-func NewEventBus(opts ...Option) *EventBus          { panic("not implemented") }
+// Recover ловит панику в handler и превращает её в error.
+func Recover[T any]() Middleware[T] { panic("not implemented") }
+
+// Timeout отменяет ctx handler'а через d; при истечении — context.DeadlineExceeded.
+func Timeout[T any](d time.Duration) Middleware[T] { panic("not implemented") }
+
+type EventBus struct {
+	// TODO: подписчики по topic, mu, closed-флаг
+}
+
+// NewEventBus создаёт шину с опциями.
+func NewEventBus(opts ...Option) *EventBus { panic("not implemented") }
+
+// Close перестаёт принимать Publish (дальше — ErrClosed), дожидается in-flight или ctx.
+// Идемпотентен.
 func (b *EventBus) Close(ctx context.Context) error { panic("not implemented") }
 
+// Subscribe регистрирует h на topic. Возвращает unsubscribe:
+// безопасен при повторном вызове и во время Publish (без "send on closed channel").
 func Subscribe[T any](bus *EventBus, topic string, h Handler[T]) (unsubscribe func()) {
 	panic("not implemented")
 }
 
+// Publish доставляет event всем подписчикам topic. Несколько подписчиков — каждый получает событие.
+// Если шина закрыта — ErrClosed.
 func Publish[T any](ctx context.Context, bus *EventBus, topic string, event T) error {
 	panic("not implemented")
 }
@@ -101,7 +61,7 @@ type OrderCreated struct {
 }
 
 func main() {
-	bus := NewEventBus(WithBufferSize(8), WithDropPolicy(DropOldest))
+	bus := NewEventBus(WithBufferSize(8))
 
 	handler := Chain(
 		func(ctx context.Context, e OrderCreated) error {
@@ -110,7 +70,6 @@ func main() {
 		},
 		Recover[OrderCreated](),
 		Timeout[OrderCreated](time.Second),
-		Retry[OrderCreated](3),
 	)
 
 	unsub := Subscribe(bus, "order.created", handler)
@@ -122,6 +81,3 @@ func main() {
 	defer cancel()
 	_ = bus.Close(ctx)
 }
-
-// Builder vs Functional Options:
-//

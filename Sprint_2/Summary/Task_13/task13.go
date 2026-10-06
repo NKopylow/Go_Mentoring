@@ -7,73 +7,50 @@ import (
 	"time"
 )
 
-// Тема: примитивы синхронизации (RWMutex, Once, Cond/каналы), атомики, тестирование.
+// Тема: RWMutex, Once, атомики, singleflight.
 //
-// Задача 13. Потокобезопасный кэш с TTL и дедупликацией загрузок (singleflight).
+// Задача 13. Потокобезопасный кэш с TTL и singleflight.
 //
-// Реализуй Cache[K comparable, V any] со следующими методами:
-//
-//   New[K, V](ttl time.Duration, opts ...Option) *Cache[K, V]
-//   (c *Cache) Get(key K) (V, bool)                  — только чтение, под RLock
-//   (c *Cache) Set(key K, value V)
-//   (c *Cache) Delete(key K)
-//   (c *Cache) GetOrLoad(ctx context.Context, key K, loader func(ctx context.Context) (V, error)) (V, error)
-//   (c *Cache) Stats() Stats                         — Hits, Misses, Loads (атомики)
-//   (c *Cache) Close()                               — останавливает фоновую очистку, идемпотентен (sync.Once)
-//
-// Требования к GetOrLoad:
-//   - если значение в кэше и не протухло — вернуть его (hit);
-//   - если нет — вызвать loader, НО: при N одновременных GetOrLoad с одним ключом loader
-//     должен выполниться РОВНО ОДИН раз, остальные ждут его результат (singleflight).
-//     Подсказка: map[K]*call, где call содержит done chan struct{}, val, err; либо sync.Once в call;
-//   - ожидающие должны уважать ctx: если их контекст отменён — вернуть ctx.Err(), не дожидаясь загрузки;
-//   - ошибка loader'а НЕ кэшируется;
-//   - loader вызывается БЕЗ удержания мьютекса (иначе весь кэш встанет на время загрузки).
-//
-// Фоновая очистка (janitor): горутина по тикеру удаляет протухшие записи. Интервал задаётся
-// Option'ом (WithCleanupInterval), по умолчанию ttl/2. Остановка — через Close().
-//
-// Тесты (go.mod + task13_test.go, запускать с -race):
-//   - Set/Get/Delete базовые, табличный тест;
-//   - протухание по TTL (используй маленький ttl, например 20ms);
-//   - singleflight: 100 горутин одновременно вызывают GetOrLoad(одного ключа), loader с time.Sleep(50ms)
-//     и atomic-счётчиком вызовов — ожидаем ровно 1 вызов и 100 одинаковых результатов;
-//   - отмена контекста ожидающего во время загрузки;
-//   - Close() дважды не паникует; после Close фоновых горутин нет (goroutine leak check);
-//   - бенчмарк Get при 90% hit-rate с b.RunParallel.
-//
-// Вопрос для рефлексии (напиши комментарием в конце файла): почему здесь RWMutex выгоднее Mutex,
-// и в каком сценарии RWMutex окажется медленнее?
+// Тесты (go.mod + task13_test.go, -race):
+//   - Set/Get/Delete; протухание по TTL (~20ms);
+//   - 100 горутин GetOrLoad одного ключа → loader вызван ровно 1 раз;
+//   - Close() дважды не паникует.
 
 type Stats struct {
 	Hits, Misses, Loads int64
 }
 
-type Option func(*config)
-
-type config struct {
-	cleanupInterval time.Duration
-}
-
-func WithCleanupInterval(d time.Duration) Option {
-	return func(c *config) { c.cleanupInterval = d }
-}
-
 type Cache[K comparable, V any] struct {
 	mu sync.RWMutex
-	// TODO: поля
+	// TODO: data, ttl, inflight-загрузки, атомики статистики
 }
 
-func New[K comparable, V any](ttl time.Duration, opts ...Option) *Cache[K, V] {
+// New создаёт кэш. Значения живут ttl с момента Set/успешного GetOrLoad.
+func New[K comparable, V any](ttl time.Duration) *Cache[K, V] {
 	panic("not implemented")
 }
 
+// Get возвращает (value, true), если ключ есть и не протух; иначе (zero, false).
+// Только чтение — под RLock.
 func (c *Cache[K, V]) Get(key K) (V, bool) { panic("not implemented") }
-func (c *Cache[K, V]) Set(key K, value V)  { panic("not implemented") }
-func (c *Cache[K, V]) Delete(key K)        { panic("not implemented") }
-func (c *Cache[K, V]) Stats() Stats        { panic("not implemented") }
-func (c *Cache[K, V]) Close()              { panic("not implemented") }
 
+// Set сохраняет value с текущим временем (TTL считается отсюда).
+func (c *Cache[K, V]) Set(key K, value V) { panic("not implemented") }
+
+// Delete удаляет ключ, если он есть.
+func (c *Cache[K, V]) Delete(key K) { panic("not implemented") }
+
+// Stats возвращает снимки Hits/Misses/Loads (атомики).
+func (c *Cache[K, V]) Stats() Stats { panic("not implemented") }
+
+// Close идемпотентно останавливает ресурсы кэша (sync.Once), если они есть.
+func (c *Cache[K, V]) Close() { panic("not implemented") }
+
+// GetOrLoad:
+//   - hit (есть и не протух) → вернуть значение, Hits++
+//   - miss → вызвать loader РОВНО один раз на ключ (остальные ждут тот же результат)
+//   - ошибка loader НЕ кэшируется; loader вызывать БЕЗ удержания мьютекса
+//   - если ctx ожидающего отменён — вернуть ctx.Err(), не дожидаясь загрузки
 func (c *Cache[K, V]) GetOrLoad(ctx context.Context, key K, loader func(ctx context.Context) (V, error)) (V, error) {
 	panic("not implemented")
 }
@@ -94,9 +71,5 @@ func main() {
 		})
 	}
 	wg.Wait()
-
 	fmt.Printf("%+v\n", cache.Stats())
 }
-
-// Ответ на вопрос про RWMutex:
-//

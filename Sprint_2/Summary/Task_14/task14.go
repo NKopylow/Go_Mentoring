@@ -7,43 +7,12 @@ import (
 	"time"
 )
 
-// Тема: WaitGroup, Mutex/Once, каналы как семафор, context.
+// Тема: WaitGroup, Once, семафор (канал), context.
 //
-// Задача 14. Собственный errgroup.
+// Задача 14. Свой errgroup (без сторонних пакетов).
 //
-// Реализуй аналог golang.org/x/sync/errgroup БЕЗ использования сторонних пакетов:
-//
-//   type Group struct { ... }
-//
-//   func WithContext(ctx context.Context) (*Group, context.Context)
-//       — возвращает группу и производный контекст, который отменяется при ПЕРВОЙ ошибке
-//         или после Wait().
-//   func (g *Group) SetLimit(n int)
-//       — максимум n одновременно работающих функций (n <= 0 — без лимита).
-//         Вызывать после старта задач — паника (как в оригинале).
-//   func (g *Group) Go(fn func() error)
-//       — запускает fn в горутине. Если лимит достигнут — Go БЛОКИРУЕТСЯ до освобождения слота.
-//   func (g *Group) TryGo(fn func() error) bool
-//       — как Go, но не блокируется: если слота нет — возвращает false.
-//   func (g *Group) Wait() error
-//       — ждёт все функции, возвращает ПЕРВУЮ ошибку (не Join!), остальные игнорирует.
-//         Первая ошибка фиксируется ровно один раз (sync.Once).
-//
-// Паника внутри fn: перехватить через recover, превратить в ошибку PanicError{Value, Stack}
-// и вернуть из Wait (в оригинале Go 1.23+ она ре-паникуется в Wait — можешь реализовать
-// любой из вариантов, но осознанно и с комментарием почему).
-//
-// Нулевое значение Group должно быть пригодно к использованию (как у sync.WaitGroup).
-//
-// Тесты (go.mod + task14_test.go, с -race):
-//   - все успешны -> nil;
-//   - первая ошибка отменяет контекст: вторая задача должна завершиться по ctx.Done() раньше своего sleep;
-//   - SetLimit(2): запускаем 10 задач с atomic-счётчиком активных, максимум одновременно не превышает 2;
-//   - TryGo возвращает false при занятых слотах;
-//   - паника превращается в ошибку / ре-паникуется;
-//   - zero value Group работает.
-//
-// В main: 5 "запросов" с задержками, третий падает — покажи, что остальные остановились по контексту.
+// Тесты (-race): успех; первая ошибка отменяет ctx; SetLimit(2) не даёт >2 активных;
+// TryGo возвращает false при занятых слотах.
 
 type PanicError struct {
 	Value any
@@ -53,14 +22,29 @@ type PanicError struct {
 func (e PanicError) Error() string { return fmt.Sprintf("panic: %v", e.Value) }
 
 type Group struct {
-	// TODO: поля
+	// TODO: поля (wg, once, err, cancel, limit-семафор)
 }
 
-func WithContext(ctx context.Context) (*Group, context.Context) { panic("not implemented") }
-func (g *Group) SetLimit(n int)                                 { panic("not implemented") }
-func (g *Group) Go(fn func() error)                             { panic("not implemented") }
-func (g *Group) TryGo(fn func() error) bool                     { panic("not implemented") }
-func (g *Group) Wait() error                                    { panic("not implemented") }
+// WithContext возвращает группу и дочерний ctx.
+// Дочерний ctx отменяется при первой ошибке или при Wait().
+func WithContext(ctx context.Context) (*Group, context.Context) {
+	panic("not implemented")
+}
+
+// SetLimit задаёт максимум одновременно работающих Go/TryGo.
+// n <= 0 — без лимита. Вызов после старта задач — паника.
+func (g *Group) SetLimit(n int) { panic("not implemented") }
+
+// Go запускает fn в горутине. При лимите — блокируется, пока не освободится слот.
+// Первая ошибка из fn фиксируется один раз (sync.Once) и отменяет дочерний ctx.
+func (g *Group) Go(fn func() error) { panic("not implemented") }
+
+// TryGo как Go, но не блокируется: если слота нет — false и fn не запускается.
+func (g *Group) TryGo(fn func() error) bool { panic("not implemented") }
+
+// Wait ждёт все задачи и возвращает первую ошибку (не Join).
+// Панику внутри fn перехватить recover'ом → PanicError.
+func (g *Group) Wait() error { panic("not implemented") }
 
 var errBoom = errors.New("boom")
 
@@ -83,6 +67,5 @@ func main() {
 			}
 		})
 	}
-
 	fmt.Println("Wait:", g.Wait())
 }

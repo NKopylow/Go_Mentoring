@@ -10,35 +10,20 @@ import (
 
 // Тема: горутины и планировщик.
 //
-// Задача 10. Параллельная сумма и эксперименты с планировщиком.
+// Задача 10. Параллельная сумма.
 //
-// 1. Реализуй ParallelSum(nums []int, workers int) int:
-//    - срез делится на `workers` примерно равных кусков;
-//    - каждый кусок суммируется в своей горутине;
-//    - частичные суммы собираются БЕЗ гонок (канал или WaitGroup + Mutex);
-//    - workers <= 0 -> использовать runtime.NumCPU();
-//    - workers > len(nums) -> не создавать пустых горутин;
-//    - результат должен совпадать с последовательной SequentialSum.
+// Реализуй ParallelSum. Добавь go.mod + task10_test.go:
+//   - табличный тест: пустой срез, 1 элемент, workers > len, нечётное деление;
+//   - бенчмарки seq / par-1 / par-4 / par-8 (b.Loop, b.ReportAllocs) на 10_000_000 элементов.
 //
-// 2. Добавь go.mod и файл task10_test.go:
-//    - табличный тест (пустой срез, 1 элемент, workers > len, нечётное деление);
-//    - бенчмарки BenchmarkSum/seq, BenchmarkSum/par-1, par-2, par-4, par-8
-//      на срезе из 10_000_000 элементов. Используй b.Loop() и b.ReportAllocs().
+// Эксперимент (результат — комментарием в конце файла):
+//   go test -bench . -cpu 1,4 — почему при GOMAXPROCS=1 параллельная версия не быстрее?
 //
-// 3. Эксперименты (результаты запиши комментарием в конце файла):
-//    - запусти бенчмарк с GOMAXPROCS=1 и с GOMAXPROCS=NumCPU
-//      (go test -bench . -cpu 1,2,4,8). Почему при GOMAXPROCS=1 параллельная
-//      версия не быстрее (или медленнее) последовательной?
-//    - при каком размере среза накладные расходы на горутины перестают
-//      окупаться? Найди порог экспериментально и добавь его в ParallelSum
-//      как константу minChunk: куски меньше неё не параллелить.
-//    - что произойдёт, если в каждой горутине вызывать runtime.Gosched()
-//      на каждой итерации? Замерь и объясни.
-//
-// Проверь: go test -race ./... и go vet ./...
+// Проверь: go test -race ./...
 
-const minChunk = 0 // подбери экспериментально
+const minChunk = 0 // опционально: не параллелить, если кусок меньше
 
+// SequentialSum суммирует nums в одном потоке. Эталон для проверки ParallelSum.
 func SequentialSum(nums []int) int {
 	sum := 0
 	for _, n := range nums {
@@ -47,6 +32,13 @@ func SequentialSum(nums []int) int {
 	return sum
 }
 
+// ParallelSum делит nums на workers кусков и суммирует каждый в своей горутине.
+//
+// Поведение:
+//   - workers <= 0  → runtime.NumCPU()
+//   - workers > len(nums) → не создавать пустых горутин (уменьшить workers)
+//   - частичные суммы собрать без гонок (канал / WaitGroup+Mutex / atomic)
+//   - результат == SequentialSum(nums)
 func ParallelSum(nums []int, workers int) int {
 	defer func() {
 		if r := recover(); r != nil {

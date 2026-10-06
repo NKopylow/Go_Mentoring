@@ -3,53 +3,67 @@ package main
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 )
 
 // Тема: каналы (pipeline), context.
 //
-// Задача 11. Конвейер (pipeline) с отменой.
+// Задача 11. Конвейер с отменой.
 //
-// Реализуй набор универсальных стадий конвейера. Все стадии:
-//   - НЕ блокируются навсегда при отмене ctx (каждая отправка/чтение — через select с ctx.Done());
-//   - закрывают свой выходной канал при завершении (входной канал закрыт или ctx отменён);
-//   - не утекают горутинами.
+// Реализуй стадии ниже. Общие правила для ВСЕХ стадий:
+//   - чтение/запись в каналы — через select с ctx.Done() (не блокироваться навсегда при отмене);
+//   - при завершении закрывать свой выходной канал;
+//   - не оставлять утекающих горутин.
 //
-// 1. Generate(ctx, nums ...int) <-chan int          — отправляет числа в канал.
-// 2. Map[T, R any](ctx, in <-chan T, fn func(T) R) <-chan R
-// 3. Filter[T any](ctx, in <-chan T, pred func(T) bool) <-chan T
-// 4. FanOut[T, R any](ctx, in <-chan T, workers int, fn func(T) R) <-chan R
-//      — fn выполняется в `workers` горутинах, результаты сливаются в один канал
-//        (переиспользуй идею Merge из Task_8). Порядок результатов НЕ важен.
-// 5. Take[T any](ctx, in <-chan T, n int) <-chan T  — пропускает первые n и закрывает выход.
-//      Важно: после Take продюсеры выше по цепочке должны завершиться, а не зависнуть
-//      (подумай, кто и как должен отменить контекст).
-//
-// В main собери цепочку: Generate -> Filter(чётные) -> FanOut(4, медленный квадрат с time.Sleep)
-// -> Take(5) и выведи результат. Затем проверь с помощью runtime.NumGoroutine()
-// (после небольшого time.Sleep), что все горутины завершились.
-//
-// Дополнительно: напиши тест, который запускает цепочку с context.WithTimeout
-// и проверяет, что функция возвращается не позднее таймаута + небольшой дельты.
-//
+// В main: Generate → Filter(чётные) → FanOut(4, slowSquare) → Take(5), вывести результат.
 // Проверь с -race.
 
+// Generate запускает горутину, которая по очереди отправляет nums в канал и закрывает его.
+// Если ctx отменён до/во время отправки — прекращает работу и закрывает канал.
 func Generate(ctx context.Context, nums ...int) <-chan int {
-	panic("not implemented")
+	jobs := make(chan int)
+	var wg sync.WaitGroup
+
+	select {
+	case <-ctx.Done():
+		close(jobs)
+		return jobs
+	default:
+		wg.Go(func() {
+			for _, value := range nums {
+				jobs <- value
+			}
+		})
+
+		go func() {
+			wg.Wait()
+			close(jobs)
+		}()
+		return jobs
+	}
 }
 
+// Map читает значения из in, применяет fn к каждому и пишет результат в выходной канал.
+// Завершается, когда in закрыт или ctx отменён.
 func Map[T, R any](ctx context.Context, in <-chan T, fn func(T) R) <-chan R {
 	panic("not implemented")
 }
 
+// Filter читает значения из in и пропускает дальше только те, для которых pred == true.
+// Завершается, когда in закрыт или ctx отменён.
 func Filter[T any](ctx context.Context, in <-chan T, pred func(T) bool) <-chan T {
 	panic("not implemented")
 }
 
+// FanOut запускает workers горутин: каждая читает из in, применяет fn, пишет в общий выход.
+// Порядок результатов НЕ важен. Когда in закрыт и все воркеры закончили — закрыть выход.
 func FanOut[T, R any](ctx context.Context, in <-chan T, workers int, fn func(T) R) <-chan R {
 	panic("not implemented")
 }
 
+// Take пропускает первые n значений из in и закрывает выход.
+// После этого продюсеры выше по цепочке должны завершиться (через отмену ctx), а не зависнуть.
 func Take[T any](ctx context.Context, in <-chan T, n int) <-chan T {
 	panic("not implemented")
 }
