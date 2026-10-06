@@ -48,7 +48,11 @@ func SequentialSum(nums []int) int {
 }
 
 func ParallelSum(nums []int, workers int) int {
-	defer recover()
+	defer func() {
+		if r := recover(); r != nil {
+			fmt.Println("Catching panic")
+		}
+	}()
 	if workers <= 0 {
 		workers = runtime.NumCPU()
 	}
@@ -57,10 +61,15 @@ func ParallelSum(nums []int, workers int) int {
 	}
 	var sum atomic.Int64
 	wg := sync.WaitGroup{}
-	chuncks := int(math.Ceil(float64(len(nums)) / float64(workers))) // 2
+	chuncks := int(math.Ceil(float64(len(nums)) / float64(workers)))
 	for i := 0; i < workers; i++ {
 		wg.Go(func() {
-			chunk := nums[i*chuncks : (i+1)*chuncks]
+			end := (i + 1) * chuncks
+			if end > len(nums) {
+				end = len(nums)
+			}
+			chunk := nums[i*chuncks : end]
+			fmt.Println("i*chuncks:", i*chuncks, "(i+1)*chuncks: ", (i+1)*chuncks)
 			chunkSum := 0
 			for _, n := range chunk {
 				chunkSum += n
@@ -68,7 +77,9 @@ func ParallelSum(nums []int, workers int) int {
 			sum.Add(int64(chunkSum))
 		})
 	}
-	panic("not implemented")
+	// panic("not implemented")
+	wg.Wait()
+	return int(sum.Load())
 }
 
 func main() {
@@ -79,7 +90,7 @@ func main() {
 
 	fmt.Println("NumCPU:", runtime.NumCPU(), "GOMAXPROCS:", runtime.GOMAXPROCS(0))
 	fmt.Println("seq:", SequentialSum(nums))
-	fmt.Println("par:", ParallelSum(nums, 4))
+	fmt.Println("par:", ParallelSum(nums, 7))
 }
 
 // Результаты экспериментов:
