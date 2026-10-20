@@ -1,83 +1,67 @@
 package main
 
 import (
-	"context"
 	"fmt"
-	"time"
+	"sync"
 )
 
-// Тема: паттерны (Functional Options, Observer, Decorator).
+// Тема: паттерн Observer (подписка на события).
 //
-// Задача 20. EventBus на каналах.
+// Задача 20. Простая шина событий.
 //
-// Тесты (-race): доставка всем подписчикам; unsubscribe безопасен; Publish после Close → ErrClosed;
-// Chain вызывает middleware в правильном порядке; Recover ловит панику.
+// Идея: кто-то публикует событие по имени (topic), все подписчики этого topic получают его.
+//
+// Шаги:
+//   1. Реализуй Subscribe и Publish.
+//   2. Запусти main — оба обработчика должны напечатать сообщение.
+//   3. Проверь: go run -race .
+//
+// Не нужно делать generics, middleware, DropPolicy и т.п. — только map + Mutex.
 
-type Option func(*EventBus)
-
-// WithBufferSize — размер буфера канала подписчика (по умолчанию 16).
-func WithBufferSize(n int) Option { panic("not implemented") }
-
-type Handler[T any] func(ctx context.Context, event T) error
-type Middleware[T any] func(Handler[T]) Handler[T]
-
-// Chain оборачивает h middleware'ами (порядок как у http: последний mw — внешний).
-func Chain[T any](h Handler[T], mws ...Middleware[T]) Handler[T] {
-	panic("not implemented")
-}
-
-// Recover ловит панику в handler и превращает её в error.
-func Recover[T any]() Middleware[T] { panic("not implemented") }
-
-// Timeout отменяет ctx handler'а через d; при истечении — context.DeadlineExceeded.
-func Timeout[T any](d time.Duration) Middleware[T] { panic("not implemented") }
+type Handler func(msg string)
 
 type EventBus struct {
-	// TODO: подписчики по topic, mu, closed-флаг
+	mu   sync.Mutex
+	subs map[string][]Handler // topic → список обработчиков
 }
 
-// NewEventBus создаёт шину с опциями.
-func NewEventBus(opts ...Option) *EventBus { panic("not implemented") }
-
-// Close перестаёт принимать Publish (дальше — ErrClosed), дожидается in-flight или ctx.
-// Идемпотентен.
-func (b *EventBus) Close(ctx context.Context) error { panic("not implemented") }
-
-// Subscribe регистрирует h на topic. Возвращает unsubscribe:
-// безопасен при повторном вызове и во время Publish (без "send on closed channel").
-func Subscribe[T any](bus *EventBus, topic string, h Handler[T]) (unsubscribe func()) {
+// NewEventBus создаёт шину с пустым map подписчиков.
+func NewEventBus() *EventBus {
 	panic("not implemented")
 }
 
-// Publish доставляет event всем подписчикам topic. Несколько подписчиков — каждый получает событие.
-// Если шина закрыта — ErrClosed.
-func Publish[T any](ctx context.Context, bus *EventBus, topic string, event T) error {
+// Subscribe добавляет handler в список подписчиков topic.
+// Вызывать под Lock.
+func (b *EventBus) Subscribe(topic string, h Handler) {
 	panic("not implemented")
 }
 
-type OrderCreated struct {
-	ID    string
-	Total int64
+// Publish вызывает ВСЕ handler'ы topic по очереди, передавая им msg.
+// Если подписчиков нет — просто ничего не делать (не ошибка).
+//
+// Важно: пока идёшь по списку handler'ов, держи RLock/Lock,
+// либо сначала скопируй срез handler'ов под Lock, а вызывай уже без блокировки
+// (чтобы handler не завис, если внутри тоже обратится к шине).
+func (b *EventBus) Publish(topic, msg string) {
+	panic("not implemented")
 }
 
 func main() {
-	bus := NewEventBus(WithBufferSize(8))
+	bus := NewEventBus()
 
-	handler := Chain(
-		func(ctx context.Context, e OrderCreated) error {
-			fmt.Println("send email for", e.ID)
-			return nil
-		},
-		Recover[OrderCreated](),
-		Timeout[OrderCreated](time.Second),
-	)
+	bus.Subscribe("order.created", func(msg string) {
+		fmt.Println("email:", msg)
+	})
+	bus.Subscribe("order.created", func(msg string) {
+		fmt.Println("analytics:", msg)
+	})
+	bus.Subscribe("user.login", func(msg string) {
+		fmt.Println("security:", msg)
+	})
 
-	unsub := Subscribe(bus, "order.created", handler)
-	defer unsub()
-
-	_ = Publish(context.Background(), bus, "order.created", OrderCreated{ID: "o1", Total: 100})
-
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	_ = bus.Close(ctx)
+	bus.Publish("order.created", "order #42")
+	// ожидаем:
+	//   email: order #42
+	//   analytics: order #42
+	// (security не вызывается — другой topic)
 }

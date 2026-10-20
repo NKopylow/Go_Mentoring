@@ -7,59 +7,61 @@ import (
 	"time"
 )
 
-// Тема: context, middleware, graceful shutdown.
+// Тема: context в HTTP.
 //
-// Задача 18. HTTP GET /orders/{id} с правильным контекстом.
+// Задача 18. Таймаут для HTTP-обработчика.
 //
-// Слои: handler → service → repository.
-// Middleware: RequestID, Timeout, Logging.
-// Graceful shutdown по SIGINT (server.Shutdown + WaitGroup аудита).
+// Цель: если запрос обрабатывается слишком долго — вернуть 504 и отменить работу.
 //
-// Тест: при таймауте — 504; request id доходит до репозитория (мок).
+// Шаги:
+//   1. Реализуй slowHandler — имитация медленной БД через select (не Sleep!).
+//   2. Реализуй Timeout middleware.
+//   3. Собери сервер в main и проверь:
+//        curl http://localhost:8080/fast   → 200 OK
+//        curl http://localhost:8080/slow   → 504 (потому что Timeout=1s, а slow ждёт 3s)
+//
+// Подсказка по middleware — как в уроке Lesson7_patterns/middleware:
+//
+//	func Timeout(d time.Duration) func(http.Handler) http.Handler {
+//	    return func(next http.Handler) http.Handler {
+//	        return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+//	            // создать ctx с таймаутом из r.Context()
+//	            // передать в next через r.WithContext(ctx)
+//	        })
+//	    }
+//	}
 
-type Order struct {
-	ID    string
-	Total int64
-}
-
-type Repository interface {
-	// Get имитирует медленную БД: ждать через select с ctx.Done(), не через time.Sleep.
-	Get(ctx context.Context, id string) (Order, error)
-}
-
-type Service struct {
-	repo Repository
-	// TODO: WaitGroup для аудита
-}
-
-// Get вызывает repo.Get, затем асинхронно пишет аудит (~300ms).
-// Аудит НЕ должен отменяться вместе с запросом → context.WithoutCancel(ctx),
-// но request id из ctx должен сохраниться.
-func (s *Service) Get(ctx context.Context, id string) (Order, error) {
+// slowHandler имитирует долгую работу (wait).
+// Если ctx отменён раньше — пишет 504 и выходит.
+// Если дождался — пишет 200 и "done".
+//
+// Каркас:
+//
+//	select {
+//	case <-time.After(wait):
+//	    w.WriteHeader(200)
+//	    fmt.Fprintln(w, "done")
+//	case <-r.Context().Done():
+//	    http.Error(w, "timeout", http.StatusGatewayTimeout) // 504
+//	}
+func slowHandler(wait time.Duration) http.HandlerFunc {
 	panic("not implemented")
 }
 
-// WithRequestID кладёт id в ctx через типизированный неэкспортируемый ключ (не string!).
-func WithRequestID(ctx context.Context, id string) context.Context {
-	panic("not implemented")
-}
-
-// RequestIDFrom достаёт request id из ctx; если нет — "".
-func RequestIDFrom(ctx context.Context) string { panic("not implemented") }
-
-// RequestID middleware: берёт X-Request-ID из заголовка или генерирует новый, кладёт в ctx.
-func RequestID(next http.Handler) http.Handler { panic("not implemented") }
-
-// Timeout(d) оборачивает r.Context() в WithTimeout.
-// При DeadlineExceeded handler отвечает 504.
+// Timeout оборачивает next: у каждого запроса свой ctx с дедлайном d.
+// Не забудь defer cancel().
 func Timeout(d time.Duration) func(http.Handler) http.Handler {
 	panic("not implemented")
 }
 
-// Logging логирует метод, путь, статус, длительность, request id.
-// Для статуса нужна обёртка над http.ResponseWriter.
-func Logging(next http.Handler) http.Handler { panic("not implemented") }
-
 func main() {
-	fmt.Println("not implemented")
+	mux := http.NewServeMux()
+	mux.Handle("/fast", slowHandler(100*time.Millisecond))
+	mux.Handle("/slow", slowHandler(3*time.Second))
+
+	// весь сервер ограничен таймаутом 1 секунда
+	handler := Timeout(time.Second)(mux)
+
+	fmt.Println("listening on :8080")
+	_ = http.ListenAndServe(":8080", handler)
 }

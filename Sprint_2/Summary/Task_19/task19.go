@@ -9,29 +9,42 @@ import (
 	"time"
 )
 
-// Тема: SOLID, DRY, KISS.
+// Тема: SOLID / DRY / KISS.
 //
-// Задача 19. Рефакторинг «божественного» OrderService.
+// Задача 19. Разрежь «божественный» сервис на части.
 //
-// 1. Комментарием: какие принципы нарушены и где (SRP, OCP, DIP, ISP, DRY).
-// 2. Отрефактори:
-//    - интерфейсы PaymentProcessor / Notifier / OrderRepository (маленькие);
-//    - оплата — Strategy + выбор по имени (новый способ без правки сервиса);
-//    - уведомления — Composite из нескольких Notifier;
-//    - зависимости через NewOrderService(...); методы принимают context.Context;
-//    - без log.Fatal в бизнес-логике; sentinel-ошибки (ErrInsufficientFunds и т.п.).
-// 3. Тесты на моках: успех; нет денег; ошибка репозитория → уведомление не шлётся.
+// Сейчас OrderService делает ВСЁ сам: валидацию, оплату, запись в файл, email.
+// Его нельзя нормально протестировать (пишет в файл, печатает в консоль).
+//
+// Шаги:
+//   1. Прочитай PlaceOrder и комментарием внизу напиши, какие принципы нарушены
+//      (хотя бы SRP — одна ответственность, DIP — зависимость от деталей).
+//   2. Выдели 2 интерфейса:
+//
+//        type Payment interface {
+//            Charge(userID string, amount float64) error
+//        }
+//        type Notifier interface {
+//            Notify(email, message string) error
+//        }
+//
+//   3. Сделай простые реализации: CardPayment (как сейчас card/paypal),
+//      ConsoleNotifier (fmt.Println вместо "отправки").
+//   4. OrderService должен принимать Payment и Notifier в конструкторе
+//      и вызывать их, а не делать всё внутри себя.
+//   5. Убери log.Fatal — возвращай ошибки.
+//   6. (по желанию) Напиши тест с fake Payment, который возвращает ошибку —
+//      и проверь, что Notifier при этом НЕ вызывается.
+//
+// Не усложняй: KISS важнее «идеальной архитектуры». Двух интерфейсов достаточно.
 
 type Order struct {
-	ID       string
-	UserID   string
-	Email    string
-	Items    []string
-	Amount   float64
-	Payment  string // "card" | "paypal" | "cash"
-	Promo    string
-	IsVIP    bool
-	CreateAt time.Time
+	ID      string
+	UserID  string
+	Email   string
+	Items   []string
+	Amount  float64
+	Payment string // "card" | "paypal" | "cash"
 }
 
 type OrderService struct {
@@ -42,8 +55,11 @@ func NewOrderService() *OrderService {
 	return &OrderService{balances: map[string]float64{"u1": 1000, "u2": 10}}
 }
 
-// PlaceOrder валидирует заказ, считает скидку, списывает оплату, сохраняет, шлёт уведомления.
-// После рефакторинга: делегирует оплату/сохранение/уведомления интерфейсам.
+// PlaceOrder сейчас нарушает SRP. После рефакторинга должна:
+//  1. Проверить заказ (userID, items, amount) — вернуть error, не log.Fatal.
+//  2. Списать деньги через Payment.Charge.
+//  3. Сохранить заказ (пока можно оставить запись в файл или упростить до fmt.Println).
+//  4. Отправить уведомление через Notifier.Notify.
 func (s *OrderService) PlaceOrder(o Order) error {
 	if o.UserID == "" {
 		log.Fatal("user id is empty")
@@ -55,35 +71,15 @@ func (s *OrderService) PlaceOrder(o Order) error {
 		return errors.New("bad amount")
 	}
 
-	amount := o.Amount
-	if o.IsVIP {
-		amount = amount * 0.9
-	}
-	if o.Promo == "SALE10" {
-		amount = amount * 0.9
-	}
-	if o.Promo == "SALE20" {
-		amount = amount * 0.8
-	}
-	if len(o.Items) > 5 {
-		amount = amount * 0.95
-	}
-
 	switch o.Payment {
-	case "card":
-		fmt.Println("[card] charging", amount)
-		if s.balances[o.UserID] < amount {
+	case "card", "paypal":
+		fmt.Println("["+o.Payment+"] charging", o.Amount)
+		if s.balances[o.UserID] < o.Amount {
 			return errors.New("insufficient funds")
 		}
-		s.balances[o.UserID] -= amount
-	case "paypal":
-		fmt.Println("[paypal] redirect to paypal, charging", amount)
-		if s.balances[o.UserID] < amount {
-			return errors.New("insufficient funds")
-		}
-		s.balances[o.UserID] -= amount
+		s.balances[o.UserID] -= o.Amount
 	case "cash":
-		fmt.Println("[cash] will be paid on delivery", amount)
+		fmt.Println("[cash] pay on delivery", o.Amount)
 	default:
 		return errors.New("unknown payment " + o.Payment)
 	}
@@ -92,17 +88,10 @@ func (s *OrderService) PlaceOrder(o Order) error {
 	if err != nil {
 		log.Fatal(err)
 	}
-	fmt.Fprintf(f, "%s;%s;%.2f;%s\n", o.ID, o.UserID, amount, strings.Join(o.Items, ","))
+	fmt.Fprintf(f, "%s;%s;%.2f;%s\n", o.ID, o.UserID, o.Amount, strings.Join(o.Items, ","))
 	f.Close()
 
-	fmt.Printf("[email] to %s: order %s placed, total %.2f\n", o.Email, o.ID, amount)
-	if o.IsVIP {
-		fmt.Printf("[push] VIP %s: thanks for order %s\n", o.UserID, o.ID)
-	}
-	if amount > 500 {
-		fmt.Printf("[slack] #sales: big order %s from %s: %.2f\n", o.ID, o.UserID, amount)
-	}
-
+	fmt.Printf("[email] to %s: order %s placed\n", o.Email, o.ID)
 	fmt.Println(time.Now().Format(time.RFC3339), "order placed", o.ID)
 	return nil
 }
@@ -110,11 +99,11 @@ func (s *OrderService) PlaceOrder(o Order) error {
 func main() {
 	s := NewOrderService()
 	err := s.PlaceOrder(Order{
-		ID: "o1", UserID: "u1", Email: "a@b.c", Items: []string{"coffee", "bagel"},
-		Amount: 700, Payment: "card", Promo: "SALE10", IsVIP: true,
+		ID: "o1", UserID: "u1", Email: "a@b.c",
+		Items: []string{"coffee"}, Amount: 300, Payment: "card",
 	})
 	fmt.Println("err:", err)
 }
 
-// Нарушенные принципы:
-// Как добавить "crypto" после рефакторинга:
+// Какие принципы нарушены и где:
+//

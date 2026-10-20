@@ -9,18 +9,25 @@ import (
 	"time"
 )
 
-// Тема: утечки памяти и горутин, pprof.
+// Тема: утечки памяти и горутин.
 //
-// Задача 16. Найди и почини утечки.
+// Задача 16. Найди баги и почини.
 //
-// Программа крутит нагрузку и печатает goroutines/heapInuse раз в секунду.
-// pprof: localhost:6060/debug/pprof/{heap,goroutine}
+// Программа специально написана плохо: память и число горутин растут без остановки.
 //
-// Найди утечки (их несколько), рядом с кодом кратко опиши проблему и фикс.
-// После правок числа должны стабилизироваться. «До/после» — комментарием в конце.
+// Как смотреть:
+//   1. go run .  — в консоли каждую секунду печатаются goroutines и heapInuse.
+//   2. Открой в браузере: http://localhost:6060/debug/pprof/goroutine?debug=1
 //
-// Подсказки: блокировка на send в канал без читателя; подписчики без Unsubscribe;
-// time.After в цикле; под-срез, держащий большой буфер; map, которая только растёт.
+// Что искать (в коде есть все эти проблемы):
+//   a) Subscribe добавляет канал, но никто никогда не удаляет подписчика.
+//   b) Publish шлёт в канал в новой горутине — если никто не читает, горутина зависает навсегда.
+//   c) big[:8] хранит ссылку на весь массив 1MB → GC не может освободить память.
+//   d) time.After в цикле создаёт таймер на каждую итерацию (лучше time.NewTimer / тикер).
+//
+// Задача: почини код так, чтобы goroutines и heapInuse перестали расти.
+// Рядом с каждым фиксом напиши короткий комментарий: что было не так.
+// В конце файла — «до» и «после» (примерно какие цифры видел).
 
 type Event struct {
 	ID      int
@@ -32,7 +39,6 @@ type Bus struct {
 	subs []chan Event
 }
 
-// Subscribe добавляет подписчика и возвращает канал событий.
 func (b *Bus) Subscribe() <-chan Event {
 	ch := make(chan Event)
 	b.mu.Lock()
@@ -41,12 +47,11 @@ func (b *Bus) Subscribe() <-chan Event {
 	return ch
 }
 
-// Publish отправляет событие всем подписчикам.
 func (b *Bus) Publish(e Event) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	for _, ch := range b.subs {
-		go func(ch chan Event) { ch <- e }(ch)
+		go func(ch chan Event) { ch <- e }(ch) // утечка?
 	}
 }
 
@@ -60,9 +65,9 @@ var (
 func processBatch(id int) {
 	ch := bus.Subscribe()
 
-	big := make([]byte, 1<<20)
+	big := make([]byte, 1<<20) // 1 MB
 	big[0] = byte(id)
-	samples = append(samples, big[:8])
+	samples = append(samples, big[:8]) // держит весь big?
 
 	timeout := time.After(50 * time.Millisecond)
 	for {
@@ -72,7 +77,7 @@ func processBatch(id int) {
 			seen[e.ID] = e.Payload
 			seenMu.Unlock()
 		case <-timeout:
-			return
+			return // а канал ch? подписчик остаётся в Bus!
 		case <-time.After(10 * time.Millisecond):
 			bus.Publish(Event{ID: id, Payload: make([]byte, 4096)})
 		}
@@ -107,5 +112,5 @@ func main() {
 	}
 }
 
-// До:
-// После:
+// До исправлений:  goroutines≈???  heap≈???MB
+// После исправлений: goroutines≈???  heap≈???MB

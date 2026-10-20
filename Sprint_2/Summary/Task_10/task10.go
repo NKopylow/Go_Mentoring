@@ -12,18 +12,18 @@ import (
 //
 // Задача 10. Параллельная сумма.
 //
-// Реализуй ParallelSum. Добавь go.mod + task10_test.go:
-//   - табличный тест: пустой срез, 1 элемент, workers > len, нечётное деление;
-//   - бенчмарки seq / par-1 / par-4 / par-8 (b.Loop, b.ReportAllocs) на 10_000_000 элементов.
+// Цель: научиться делить работу между горутинами и собирать результат без гонок.
 //
-// Эксперимент (результат — комментарием в конце файла):
-//   go test -bench . -cpu 1,4 — почему при GOMAXPROCS=1 параллельная версия не быстрее?
-//
-// Проверь: go test -race ./...
+// Шаги:
+//   1. Допиши ParallelSum (см. описание функции ниже).
+//   2. В main сравни SequentialSum и ParallelSum — числа должны совпасть.
+//   3. (по желанию) Добавь go.mod и простой тест TestParallelSum.
+//   4. Запусти: go test -race .   и   go test -bench . -cpu 1,4
+//      Напиши комментарием в конце: почему при -cpu 1 параллельная версия
+//      не быстрее последовательной?
 
-const minChunk = 0 // опционально: не параллелить, если кусок меньше
-
-// SequentialSum суммирует nums в одном потоке. Эталон для проверки ParallelSum.
+// SequentialSum — обычная сумма в одном потоке. Уже готова, не меняй.
+// Нужна, чтобы сверить результат ParallelSum.
 func SequentialSum(nums []int) int {
 	sum := 0
 	for _, n := range nums {
@@ -32,13 +32,16 @@ func SequentialSum(nums []int) int {
 	return sum
 }
 
-// ParallelSum делит nums на workers кусков и суммирует каждый в своей горутине.
+// ParallelSum должна:
+//  1. Разделить nums на workers примерно равных кусков.
+//  2. Каждый кусок посчитать в своей горутине.
+//  3. Сложить частичные суммы (atomic / Mutex / канал — на выбор).
+//  4. Дождаться всех горутин (WaitGroup) и вернуть итог.
 //
-// Поведение:
-//   - workers <= 0  → runtime.NumCPU()
-//   - workers > len(nums) → не создавать пустых горутин (уменьшить workers)
-//   - частичные суммы собрать без гонок (канал / WaitGroup+Mutex / atomic)
-//   - результат == SequentialSum(nums)
+// Краевые случаи:
+//   - workers <= 0           → взять runtime.NumCPU()
+//   - workers > len(nums)    → уменьшить workers до len(nums)
+//   - пустой nums            → вернуть 0
 func ParallelSum(nums []int, workers int) int {
 	defer func() {
 		if r := recover(); r != nil {
@@ -69,7 +72,6 @@ func ParallelSum(nums []int, workers int) int {
 			sum.Add(int64(chunkSum))
 		})
 	}
-	// panic("not implemented")
 	wg.Wait()
 	return int(sum.Load())
 }
@@ -85,5 +87,5 @@ func main() {
 	fmt.Println("par:", ParallelSum(nums, 7))
 }
 
-// Результаты экспериментов:
+// Почему при -cpu 1 параллельная версия не быстрее:
 //

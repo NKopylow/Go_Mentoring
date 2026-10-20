@@ -4,68 +4,76 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sync"
 	"time"
 )
 
-// Тема: WaitGroup, Once, семафор (канал), context.
+// Тема: WaitGroup + context + sync.Once.
 //
-// Задача 14. Свой errgroup (без сторонних пакетов).
+// Задача 14. Группа задач с отменой при первой ошибке.
 //
-// Тесты (-race): успех; первая ошибка отменяет ctx; SetLimit(2) не даёт >2 активных;
-// TryGo возвращает false при занятых слотах.
-
-type PanicError struct {
-	Value any
-	Stack []byte
-}
-
-func (e PanicError) Error() string { return fmt.Sprintf("panic: %v", e.Value) }
+// Похоже на упрощённый errgroup: запускаешь несколько задач,
+// если одна упала — остальные получают сигнал через ctx и тоже останавливаются.
+//
+// Шаги:
+//   1. Реализуй WithContext, Go, Wait.
+//   2. Запусти main: задача 3 падает → остальные должны напечатать "cancelled".
+//   3. Проверь: go run -race .
 
 type Group struct {
-	// TODO: поля (wg, once, err, cancel, limit-семафор)
+	wg     sync.WaitGroup
+	once   sync.Once
+	err    error
+	cancel context.CancelFunc
 }
 
-// WithContext возвращает группу и дочерний ctx.
-// Дочерний ctx отменяется при первой ошибке или при Wait().
+// WithContext создаёт группу и дочерний контекст.
+//
+//	child, cancel := context.WithCancel(parent)
+//
+// cancel сохрани в Group — он понадобится, когда какая-то задача вернёт ошибку.
+// Верни (&Group{cancel: cancel}, child).
 func WithContext(ctx context.Context) (*Group, context.Context) {
 	panic("not implemented")
 }
 
-// SetLimit задаёт максимум одновременно работающих Go/TryGo.
-// n <= 0 — без лимита. Вызов после старта задач — паника.
-func (g *Group) SetLimit(n int) { panic("not implemented") }
+// Go запускает fn в новой горутине.
+//
+// Что должна делать горутина:
+//  1. defer g.wg.Done()  (не забудь g.wg.Add(1) перед запуском)
+//  2. вызвать err := fn()
+//  3. если err != nil — один раз (через g.once.Do) сохранить err и вызвать g.cancel()
+func (g *Group) Go(fn func() error) {
+	panic("not implemented")
+}
 
-// Go запускает fn в горутине. При лимите — блокируется, пока не освободится слот.
-// Первая ошибка из fn фиксируется один раз (sync.Once) и отменяет дочерний ctx.
-func (g *Group) Go(fn func() error) { panic("not implemented") }
-
-// TryGo как Go, но не блокируется: если слота нет — false и fn не запускается.
-func (g *Group) TryGo(fn func() error) bool { panic("not implemented") }
-
-// Wait ждёт все задачи и возвращает первую ошибку (не Join).
-// Панику внутри fn перехватить recover'ом → PanicError.
-func (g *Group) Wait() error { panic("not implemented") }
+// Wait ждёт все горутины (g.wg.Wait) и возвращает первую ошибку (или nil).
+// После Wait можно вызвать cancel, чтобы освободить ресурсы контекста.
+func (g *Group) Wait() error {
+	panic("not implemented")
+}
 
 var errBoom = errors.New("boom")
 
 func main() {
 	g, ctx := WithContext(context.Background())
-	g.SetLimit(3)
 
 	for i := 1; i <= 5; i++ {
+		id := i // важно скопировать, иначе все горутины увидят одно i
 		g.Go(func() error {
-			if i == 3 {
-				return fmt.Errorf("task %d: %w", i, errBoom)
+			if id == 3 {
+				return fmt.Errorf("task %d: %w", id, errBoom)
 			}
 			select {
-			case <-time.After(time.Duration(i) * 200 * time.Millisecond):
-				fmt.Println("task", i, "done")
+			case <-time.After(time.Duration(id) * 300 * time.Millisecond):
+				fmt.Println("task", id, "done")
 				return nil
 			case <-ctx.Done():
-				fmt.Println("task", i, "cancelled:", ctx.Err())
+				fmt.Println("task", id, "cancelled:", ctx.Err())
 				return ctx.Err()
 			}
 		})
 	}
+
 	fmt.Println("Wait:", g.Wait())
 }

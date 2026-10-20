@@ -8,37 +8,41 @@ import (
 	"time"
 )
 
-// Тема: context, каналы, утечки горутин.
+// Тема: context + горутины.
 //
-// Задача 12. Первый успешный ответ побеждает.
+// Задача 12. Кто ответил первым — тот победил.
 //
-// В main: 3 реплики (одна всегда падает). Выведи победителя и время.
-// Напиши тесты: победа быстрого; все упали; таймаут ctx. Запусти с -race.
+// Представь: у тебя 3 копии одного сервиса. Ты спрашиваешь все сразу
+// и берёшь ответ самой быстрой. Остальные запросы отменяешь.
+//
+// Шаги:
+//   1. Реализуй FirstSuccess (см. ниже).
+//   2. Запусти main — должен напечататься ответ A или B (не C, он всегда падает).
+//   3. (по желанию) Напиши тест: все упали → ошибка; ctx с коротким таймаутом → ctx.Err().
 
 var ErrNoFetchers = errors.New("no fetchers provided")
 
-// FirstSuccess запускает все fns параллельно с общим дочерним контекстом.
+// FirstSuccess запускает все fns в отдельных горутинах ОДНОВРЕМЕННО.
 //
-// Поведение:
-//   - len(fns) == 0 → ErrNoFetchers
-//   - первый успешный (T, nil) → отменить остальных через ctx, вернуть результат
-//   - все вернули ошибку → errors.Join(...ошибки)
-//   - родительский ctx отменён раньше → ctx.Err()
-//   - после возврата горутины не должны блокироваться навсегда (буфер канала / select)
-func FirstSuccess[T any](ctx context.Context, fns ...func(ctx context.Context) (T, error)) (T, error) {
+// Что должна делать:
+//  1. Если fns пустой — вернуть "", ErrNoFetchers.
+//  2. Создать дочерний контекст: ctx, cancel := context.WithCancel(ctx)
+//     (не забудь defer cancel()).
+//  3. Для каждой fn запустить горутину: вызвать fn(childCtx), результат положить в канал.
+//  4. Читать из канала:
+//     - первая успешная (err == nil) → cancel() остальных, вернуть результат;
+//     - если пришла ошибка — запомнить её, ждать дальше;
+//     - если ошибок столько же, сколько fns — вернуть ошибку (можно errors.Join);
+//     - если родительский ctx отменён — вернуть ctx.Err().
+//
+// Подсказка: канал результатов сделай буферизованным (len(fns)),
+// чтобы горутины не застряли на отправке после того, как ты уже вышел из функции.
+func FirstSuccess(ctx context.Context, fns ...func(ctx context.Context) (string, error)) (string, error) {
 	panic("not implemented")
 }
 
-// WithRetry возвращает обёртку над fn: до attempts попыток с паузой delay между ними.
-//
-// Поведение:
-//   - при успехе — сразу вернуть результат
-//   - пауза через select { time.After / ctx.Done }, не через time.Sleep
-//   - при отмене ctx во время паузы — вернуть ctx.Err()
-func WithRetry[T any](attempts int, delay time.Duration, fn func(ctx context.Context) (T, error)) func(ctx context.Context) (T, error) {
-	panic("not implemented")
-}
-
+// replica — готовая "заглушка сервиса". Не меняй.
+// fail=true → всегда возвращает ошибку после случайной задержки.
 func replica(name string, fail bool) func(ctx context.Context) (string, error) {
 	return func(ctx context.Context) (string, error) {
 		d := time.Duration(100+rand.Intn(900)) * time.Millisecond
@@ -62,7 +66,9 @@ func main() {
 	res, err := FirstSuccess(ctx,
 		replica("A", false),
 		replica("B", false),
-		WithRetry(3, 50*time.Millisecond, replica("C", true)),
+		replica("C", true),
 	)
-	fmt.Println(res, err, time.Since(start))
+	fmt.Println("result:", res)
+	fmt.Println("error:", err)
+	fmt.Println("took:", time.Since(start))
 }

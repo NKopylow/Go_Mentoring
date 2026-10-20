@@ -1,75 +1,75 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"sync"
 	"time"
 )
 
-// Тема: RWMutex, Once, атомики, singleflight.
+// Тема: Mutex / RWMutex.
 //
-// Задача 13. Потокобезопасный кэш с TTL и singleflight.
+// Задача 13. Простой потокобезопасный кэш со сроком жизни (TTL).
 //
-// Тесты (go.mod + task13_test.go, -race):
-//   - Set/Get/Delete; протухание по TTL (~20ms);
-//   - 100 горутин GetOrLoad одного ключа → loader вызван ровно 1 раз;
-//   - Close() дважды не паникует.
+// Цель: несколько горутин читают и пишут в map без гонок.
+//
+// Шаги:
+//   1. Добавь в Cache поля: data (map), ttl, mu (RWMutex).
+//   2. Реализуй New, Get, Set, Delete.
+//   3. Запусти с флагом race: go run -race .
+//   4. (по желанию) Напиши TestCache_TTL: Set → сразу Get ok → sleep > ttl → Get false.
 
-type Stats struct {
-	Hits, Misses, Loads int64
+// entry — одна запись в кэше: значение + время, когда оно протухнет.
+type entry struct {
+	value     string
+	expiresAt time.Time
 }
 
-type Cache[K comparable, V any] struct {
+type Cache struct {
 	mu sync.RWMutex
-	// TODO: data, ttl, inflight-загрузки, атомики статистики
+	// TODO: data map[string]entry
+	// TODO: ttl  time.Duration
 }
 
-// New создаёт кэш. Значения живут ttl с момента Set/успешного GetOrLoad.
-func New[K comparable, V any](ttl time.Duration) *Cache[K, V] {
+// New создаёт пустой кэш. ttl — сколько живёт каждая запись после Set.
+func New(ttl time.Duration) *Cache {
 	panic("not implemented")
 }
 
-// Get возвращает (value, true), если ключ есть и не протух; иначе (zero, false).
-// Только чтение — под RLock.
-func (c *Cache[K, V]) Get(key K) (V, bool) { panic("not implemented") }
+// Set сохраняет value по ключу key.
+// Время протухания = сейчас + ttl кэша.
+// Писать под Lock (не RLock!).
+func (c *Cache) Set(key, value string) {
+	panic("not implemented")
+}
 
-// Set сохраняет value с текущим временем (TTL считается отсюда).
-func (c *Cache[K, V]) Set(key K, value V) { panic("not implemented") }
+// Get возвращает (value, true), если ключ есть и ещё не протух.
+// Если ключа нет или он протух — ("", false).
+// Читать под RLock.
+//
+// Подсказка: протух = time.Now().After(entry.expiresAt)
+func (c *Cache) Get(key string) (string, bool) {
+	panic("not implemented")
+}
 
-// Delete удаляет ключ, если он есть.
-func (c *Cache[K, V]) Delete(key K) { panic("not implemented") }
-
-// Stats возвращает снимки Hits/Misses/Loads (атомики).
-func (c *Cache[K, V]) Stats() Stats { panic("not implemented") }
-
-// Close идемпотентно останавливает ресурсы кэша (sync.Once), если они есть.
-func (c *Cache[K, V]) Close() { panic("not implemented") }
-
-// GetOrLoad:
-//   - hit (есть и не протух) → вернуть значение, Hits++
-//   - miss → вызвать loader РОВНО один раз на ключ (остальные ждут тот же результат)
-//   - ошибка loader НЕ кэшируется; loader вызывать БЕЗ удержания мьютекса
-//   - если ctx ожидающего отменён — вернуть ctx.Err(), не дожидаясь загрузки
-func (c *Cache[K, V]) GetOrLoad(ctx context.Context, key K, loader func(ctx context.Context) (V, error)) (V, error) {
+// Delete удаляет ключ (если есть). Писать под Lock.
+func (c *Cache) Delete(key string) {
 	panic("not implemented")
 }
 
 func main() {
-	cache := New[string, string](time.Second)
-	defer cache.Close()
+	cache := New(200 * time.Millisecond)
 
 	var wg sync.WaitGroup
 	for i := 0; i < 10; i++ {
 		wg.Go(func() {
-			v, err := cache.GetOrLoad(context.Background(), "user:1", func(ctx context.Context) (string, error) {
-				fmt.Println("loading...") // должно напечататься один раз
-				time.Sleep(100 * time.Millisecond)
-				return "Alice", nil
-			})
-			fmt.Println(v, err)
+			cache.Set("user", "Alice")
+			v, ok := cache.Get("user")
+			fmt.Println(v, ok)
 		})
 	}
 	wg.Wait()
-	fmt.Printf("%+v\n", cache.Stats())
+
+	time.Sleep(300 * time.Millisecond)
+	v, ok := cache.Get("user")
+	fmt.Println("after TTL:", v, ok) // ожидаем: "" false
 }
